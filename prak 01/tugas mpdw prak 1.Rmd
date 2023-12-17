@@ -1,0 +1,412 @@
+---
+title: "Tugas 1 Praktikum MPDW"
+author: "Septiranny Rizqika Putri G1401211083"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Packages
+
+```{r}
+install.packages("forecast")
+install.packages("graphics")
+install.packages("TTR")
+install.packages("TSA")
+
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+```
+
+#Impor data
+
+```{r}
+library(readxl)
+gas <- read_excel("gasoline.xlsx")
+gas
+```
+
+Mengubah peubah respon Gasoline_Production menjadi dalam satuan ribu
+```{r}
+gas$Gasoline_Production <- gas$Gasoline_Production/1000
+```
+
+#Eksplorasi data
+
+Melihat dimensi/ukuran data
+```{r}
+dim(gas)
+```
+
+Melihat struktur data 
+```{r}
+str(gas)
+```
+
+Membuat data terbaca sebagai data time series
+```{r}
+gas.ts <- ts(gas$Gasoline_Production)
+```
+
+Menampilkan ringkasan data
+```{r}
+summary(gas.ts)
+```
+
+Menampilkan plot deret waktu data
+```{r}
+ts.plot(gas.ts, xlab="Tahun-Pekan", ylab="Produksi Gasoline", 
+        main = "Time Series Plot")
+points(gas.ts)
+```
+
+#Pemulusan
+
+##Pembagian data
+
+Data dibagi menjadi data latih dan data uji, dengan komposisi 80% data latih dan 20% data uji
+```{r}
+gas.train <- gas[1:138,]
+gas.test <- gas[139:173,]
+```
+
+Membuat data terbaca sebagai data time series
+```{r}
+ts.train <- ts(gas.train$Gasoline_Production)
+ts.test <- ts(gas.test$Gasoline_Production)
+```
+
+##Eksplorasi data
+
+Menampilkan plot deret waktu data keseluruhan
+```{r}
+plot(gas.ts, col="red",main="Plot semua data")
+points(gas.ts)
+```
+
+Menampilkan plot deret waktu data latih
+```{r}
+plot(ts.train, col="blue",main="Plot data latih")
+points(ts.train)
+```
+
+Menampilkan plot deret waktu data uji
+```{r}
+plot(ts.test, col="blue",main="Plot data uji")
+points(ts.test)
+```
+
+##Pemulusan dengan Single Moving Average
+
+Pemulusan SMA dengan parameter $m=3$
+```{r}
+gas.sma<-SMA(ts.train, n=3)
+gas.sma
+```
+
+Hasil peramalan 1 periode ke depan
+```{r}
+ramal.sma<-c(NA,gas.sma)
+ramal.sma
+```
+
+Selanjutnya, dilakukan peramalan sejumlah data uji, yaitu 35 periode. Pada metode SMA, hasil peramalan 35 periode ke depan akan bernilai sama dengan hasil peramalan 1 periode ke depan.
+
+Penggabungan data train aktual, data train hasil pemulusan, dan data hasil ramalan 35 periode ke depan
+```{r}
+data.gab<-cbind(aktual=c(ts.train,rep(NA,35)),pemulusan=c(gas.sma,rep(NA,35)),ramalan=c(ramal.sma,rep(ramal.sma[length(ramal.sma)],34)))
+data.gab
+```
+
+Menampilkan plot deret waktu data hasil peramalan
+```{r}
+ts.plot(gas.ts, xlab="Time Period", ylab="Production", main= "SMA N=3 Gasoline Production")
+points(gas.ts)
+lines(data.gab[,2],col="green",lwd=2)
+lines(data.gab[,3],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.5)
+```
+
+Perhitungan akurasi dengan ukuran akurasi *Sum Squares Error* (SSE), *Mean Square Error* (MSE), dan *Mean Absolute Percentage Error* (MAPE).
+
+
+Perhitungan akurasi pada data latih
+```{r}
+#Akurasi data latih
+error_train.sma = ts.train-ramal.sma[1:length(ts.train)]
+SSE_train.sma = sum(error_train.sma[4:length(ts.train)]^2)
+MSE_train.sma = mean(error_train.sma[4:length(ts.train)]^2)
+MAPE_train.sma = mean(abs((error_train.sma[4:length(ts.train)]/ts.train[4:length(ts.train)])*100))
+
+akurasi_train.sma <- matrix(c(SSE_train.sma, MSE_train.sma, MAPE_train.sma))
+row.names(akurasi_train.sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.sma) <- c("Akurasi m = 3")
+akurasi_train.sma
+```
+
+MAPE data latih pada metode pemulusan SMA dengan m=3 berkisar 4,6%. Ini menunjukkan akurasinya sangat baik.
+
+
+Penghitungan akurasi pada data uji
+```{r}
+#Akurasi data uji
+error_test.sma = ts.test-data.gab[139:173,3]
+SSE_test.sma = sum(error_test.sma^2)
+MSE_test.sma = mean(error_test.sma^2)
+MAPE_test.sma = mean(abs((error_test.sma/ts.test*100)))
+
+akurasi_test.sma <- matrix(c(SSE_test.sma, MSE_test.sma, MAPE_test.sma))
+row.names(akurasi_test.sma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.sma) <- c("Akurasi m = 3")
+akurasi_test.sma
+```
+
+MAPE data uji pada metode pemulusan SMA dengan m=3 berkisar 5%. Ini menunjukkan akurasinya sangat baik.
+
+
+##Pemulusan dengan Double Moving Average
+
+```{r}
+dma <- SMA(gas.sma, n=3)
+At <- 2*gas.sma - dma
+Bt <- 2/(3-1)*(gas.sma - dma)
+gas.dma<- At+Bt
+ramal.dma<- c(NA, gas.dma)
+
+t = 1:35
+f = c()
+
+for (i in t) {
+  f[i] = At[length(At)] + Bt[length(Bt)]*(i)
+}
+
+data.gab2 <- cbind(aktual = c(ts.train,rep(NA,35)), pemulusan1 = c(gas.sma,rep(NA,35)), pemulusan2 = c(gas.dma, rep(NA,35)), At = c(At, rep(NA,35)), Bt = c(Bt,rep(NA,35)), ramalan = c(ramal.dma, f[-1]))
+
+options(max.print=1500) #Agar semua 173 amatan dapat ditampilkan
+data.gab2
+```
+
+Visualisasi hasil pemulusan dengan DMA
+```{r}
+ts.plot(gas.ts, xlab="Time Period", ylab="Production", main= "DMA N=3 Gasoline Production")
+points(gas.ts)
+lines(data.gab2[,3],col="green",lwd=2)
+lines(data.gab2[,6],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), lty=8, col=c("black","green","red"), cex=0.8)
+```
+
+Selanjutnya, dilakukan perhitungan akurasi dengan ukuran akurasi SSE, MSE, dan MAPE.
+
+
+Perhitungan akurasi pada data latih
+```{r}
+#Akurasi data latih
+error_train.dma = ts.train-ramal.dma[1:length(ts.train)]
+SSE_train.dma = sum(error_train.dma[6:length(ts.train)]^2)
+MSE_train.dma = mean(error_train.dma[6:length(ts.train)]^2)
+MAPE_train.dma = mean(abs((error_train.dma[6:length(ts.train)]/ts.train[6:length(ts.train)])*100))
+
+akurasi_train.dma <- matrix(c(SSE_train.dma, MSE_train.dma, MAPE_train.dma))
+row.names(akurasi_train.dma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.dma) <- c("Akurasi m = 3")
+akurasi_train.dma
+```
+
+MAPE data latih pada metode pemulusan DMA dengan m=3 berkisar 5,5%. Ini menunjukkan akurasinya sangat baik.
+
+
+Penghitungan akurasi data uji
+```{r}
+#Akurasi data uji
+error_test.dma = ts.test-data.gab2[139:173,6]
+SSE_test.dma = sum(error_test.dma^2)
+MSE_test.dma = mean(error_test.dma^2)
+MAPE_test.dma = mean(abs((error_test.dma/ts.test*100)))
+
+akurasi_test.dma <- matrix(c(SSE_test.dma, MSE_test.dma, MAPE_test.dma))
+row.names(akurasi_test.dma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.dma) <- c("Akurasi m = 3")
+akurasi_test.dma
+```
+
+MAPE data uji pada metode pemulusan DMA dengan m=3 berkisar 7,9%. Ini menunjukkan akurasinya sangat baik.
+
+
+Baik pada data latih maupun data uji, metode SMA memiliki akurasi yang lebih baik.
+
+
+##Pemulusan dengan Single Exponential Smoothing
+
+Pemulusan dengan metode SES dapat dilakukan dengan dua fungsi dari *packages* berbeda, yaitu (1) fungsi `ses()` dari *packages* `forecast` dan (2) fungsi `HoltWinters` dari *packages* `stats`.
+
+
+Pemulusan dengan SES menggunakan fungsi `ses()`
+```{r}
+#Cara 1 (fungsi ses)
+ses1 <- ses(ts.train, h = 35, alpha = 0.2)
+plot(ses1)
+ses1
+
+ses2<- ses(ts.train, h = 35, alpha = 0.7)
+plot(ses2)
+ses2
+```
+
+Visualisasi hasil pemulusan dengan SES
+```{r}
+autoplot(ses1) + autolayer(fitted(ses1), series="Fitted")
+```
+
+Pemulusan dengan SES menggunakan fungsi `HoltWinters()`
+```{r}
+#Cara 2 (fungsi Holtwinter)
+ses.hw1<- HoltWinters(ts.train, gamma = FALSE, beta = FALSE, alpha = 0.2)
+plot(ses.hw1)
+
+#ramalan
+ramalan.hw1<- forecast(ses.hw1, h=35)
+ramalan.hw1
+
+ses.hw2<- HoltWinters(ts.train, gamma = FALSE, beta = FALSE, alpha = 0.7)
+plot(ses.hw2)
+
+#ramalan
+ramalan.hw2<- forecast(ses.hw2, h=35)
+ramalan.hw2
+```
+
+Pemulusan dengan nilai parameter alpha ($\alpha$) yang dioptimalkan
+```{r}
+#Menggunakan fungsi ses
+ses.opt <- ses(ts.train, h=35, alpha = NULL)
+plot(ses.opt)
+ses.opt
+
+
+#Lambda Optimum Holt Winter
+seshw.opt<- HoltWinters(ts.train, gamma = FALSE, beta = FALSE,alpha = NULL)
+seshw.opt
+plot(seshw.opt)
+
+#Ramalan Holt Winter
+ramalanopt<- forecast(seshw.opt, h=35)
+ramalanopt
+```
+
+###Perhitungan akurasi data latih
+
+Cara langsung
+```{r}
+#Akurasi data latih secara langsung
+SSE1<-ses.hw1$SSE
+MSE1<-ses.hw1$SSE/length(ts.train)
+RMSE1<-sqrt(MSE1)
+
+akurasi1 <- matrix(c(SSE1,MSE1,RMSE1))
+row.names(akurasi1)<- c("SSE", "MSE", "RMSE")
+colnames(akurasi1) <- c("Akurasi lambda=0.2")
+akurasi1
+
+SSE2<-ses.hw2$SSE
+MSE2<-ses.hw2$SSE/length(ts.train)
+RMSE2<-sqrt(MSE2)
+
+akurasi2 <- matrix(c(SSE2,MSE2,RMSE2))
+row.names(akurasi2)<- c("SSE", "MSE", "RMSE")
+colnames(akurasi2) <- c("Akurasi lambda=0.7")
+akurasi2
+```
+
+Baik dilihat dari SSE, MSE, maupun RMSE, nilai pada $\lambda=0,2$ lebih besar dibandingkan nilai pada $\lambda=0,7$. Ini menunjukkan bahwa dengan parameter $\lambda=0,7$ menghasilkan akurasi yang lebih baik.
+
+
+Cara manual
+```{r}
+#Akurasi data latih secara manual
+fitted1<-ramalan.hw1$fitted
+sisaan1<-ramalan.hw1$residuals
+head(sisaan1)
+
+resid1<-gas.train$Gasoline_Production-ramalan.hw1$fitted
+head(resid1)
+
+SSE.1=sum(sisaan1[2:length(ts.train)]^2)
+
+MSE.1 = SSE.1/length(ts.train)
+
+MAPE.1 = sum(abs(sisaan1[2:length(ts.train)]/ts.train[2:length(ts.train)])*100)/length(ts.train)
+
+akurasi.1 <- matrix(c(SSE.1,MSE.1,MAPE.1))
+row.names(akurasi.1)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi.1) <- c("Akurasi lambda=0.2")
+akurasi.1
+
+fitted2<-ramalan.hw2$fitted
+sisaan2<-ramalan.hw2$residuals
+head(sisaan2)
+
+resid2<-gas.train$Gasoline_Production-ramalan.hw2$fitted
+head(resid2)
+
+SSE.2=sum(sisaan2[2:length(ts.train)]^2)
+
+MSE.2 = SSE.2/length(ts.train)
+
+MAPE.2 = sum(abs(sisaan2[2:length(ts.train)]/ts.train[2:length(ts.train)])*100)/length(ts.train)
+
+akurasi.2 <- matrix(c(SSE.2,MSE.2,MAPE.2))
+row.names(akurasi.2)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi.2) <- c("Akurasi lambda=0.7")
+akurasi.2
+```
+
+Parameter $\lambda=0,2$ menghasilkan MAPE senilai 5,2%, sedangkan parameter $\lambda=0,7$ menghasilkan MAPE senilai 4%. Ini menunjukkan bahwa keduanya memiliki akurasi yang tinggi, namun parameter $\lambda=0,7$ lebih baik.
+
+
+###Perhitungan akurasi data uji
+
+Cara manual
+```{r}
+#Akurasi data uji
+selisih1<-ramalan.hw1$mean-gas.test$Gasoline_Production
+SSEtesting1<-sum(selisih1^2)
+MSEtesting1<-SSEtesting1/length(gas.test)
+
+selisih2<-ramalan.hw2$mean-gas.test$Gasoline_Production
+SSEtesting2<-sum(selisih2^2)
+MSEtesting2<-SSEtesting2/length(gas.test)
+
+selisihopt<-ramalanopt$mean-gas.test$Gasoline_Production
+SSEtestingopt<-sum(selisihopt^2)
+MSEtestingopt<-SSEtestingopt/length(gas.test)
+
+akurasitesting1 <- matrix(c(SSEtesting1,SSEtesting2,SSEtestingopt))
+row.names(akurasitesting1)<- c("SSE1", "SSE2", "SSEopt")
+akurasitesting1
+
+akurasitesting2 <- matrix(c(MSEtesting1,MSEtesting2,MSEtestingopt))
+row.names(akurasitesting2)<- c("MSE1", "MSE2", "MSEopt")
+akurasitesting2
+```
+
+Baik dari SSE maupun MSE, nilai terkecil ada di ramalan pertama, yaitu ramalan dengan parameter $\lambda=0,2$. Sehingga, itulah yang akurasinya paling baik.
+
+
+Melihat akurasi data dengan cara lain
+```{r}
+#Akurasi data dengan cara lain
+ak1 <- accuracy(ramalan.hw1,gas.test$Gasoline_Production)
+ak1
+
+ak2 <- accuracy(ramalan.hw2,gas.test$Gasoline_Production)
+ak2
+
+ak.opt <- accuracy(ramalanopt,gas.test$Gasoline_Production)
+ak.opt
+```
+
+Seperti pengujian akurasi dengan cara lain sebelumnya, fungsi `accuracy()` juga menunjukkan bahwa yang paling akurat untuk digunakan adalah yang menggunakan nilai parameter $\lambda=0,2$
