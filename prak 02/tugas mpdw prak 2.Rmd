@@ -1,0 +1,372 @@
+---
+title: "Tugas Praktikum 2 MPDW"
+author: "Septiranny Rizqika Putri G1401211083"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Packages
+
+```{r}
+library(dplyr)
+library(TTR)
+library(forecast)
+library(lmtest) #untuk uji formal deteksi autokorelasi
+library(orcutt) #untuk buat model regresi Cochrane-Orcutt
+library(HoRM) #untuk buat model regresi Hildreth-Lu
+```
+
+#Input data
+
+Dataset yang digunakan adalah data penjualan mingguan obat sejak 1 Januari 2014 hingga 13 Oktober 2019.
+```{r}
+library(readr)
+data <- read_csv("salesweekly.csv")
+data
+```
+
+Pada dataset mentah, terdapat beberapa variabel (jenis obat). Dalam hal ini, peubah yang akan digunakan adalah penjualan obat analgesik salicylic acid (N02BA).
+```{r}
+penjualan <- as.data.frame(data[,4])
+penjualan
+```
+
+Meski disebut data mingguan, amatan pertama bukan hasil amatan selama satu pekan penuh (7 hari), karena 1 Januari 2014 jatuh di hari Rabu, dan peneliti melakukan pencatatan tiap hari Minggu. Karena amatan pertama periodenya tidak seragam (hanya 5 hari), data yang digunakan akan dipotong.
+
+
+Data yang digunakan merupakan data 1 September 2014 (jatuh di hari Senin, sehingga periode amatannya 7 hari) hingga 13 Oktober 2019 dengan jumlah 267 amatan (267 pekan).
+
+```{r}
+penjualan <- penjualan[36:302,]
+penjualan <- as.data.frame(penjualan)
+penjualan
+```
+
+Peubah 'datum' di data mentah menunjukkan tanggal pencatatan. Akan diubah penyajiannya dalam bentuk 'pekan ke-'
+```{r}
+pekan <- c(seq(1:267))
+data <- as.data.frame(cbind(pekan,penjualan))
+data
+```
+
+
+#Eksplorasi data
+
+Melihat struktur data
+```{r}
+str(data)
+```
+
+Melihat dimensi/ukuran data
+```{r}
+dim(data)
+```
+
+Membuat data terbaca sebagai data time series
+```{r}
+datats <- ts(data$penjualan)
+```
+
+Menampilkan plot time series data
+```{r}
+ts.plot(datats, xlab="Periode", ylab="Penjualan", main= "Plot Deret Waktu Penjualan")
+points(datats)
+```
+
+Plot deret waktu menunjukkan bahwa data memiliki kecenderungan pola menurun, meski tidak signifikan. Dilakukan pemulusan data dengan metode DMA dan DES.
+
+
+#Pemulusan dengan DMA
+
+Pemulusan dengan metode DMA dengan parameter m=6. Peramalan untuk 50 periode ke depan
+```{r}
+dt.sma <- SMA(datats, n=6)
+dma <- SMA(dt.sma, n=6)
+At <- 2*dt.sma - dma
+Bt <- 2/(6-1)*(dt.sma - dma)
+dt.dma<- At+Bt
+dt.ramal<- c(NA, dt.sma)
+
+t = 1:50
+f = c()
+
+for (i in t) {
+  f[i] = At[length(At)] + Bt[length(Bt)]*(i)
+}
+```
+
+```{r}
+dt.gab <- cbind(aktual = c(datats,rep(NA,50)), 
+                pemulusan1 = c(dt.sma,rep(NA,50)),
+                pemulusan2 = c(dt.dma, rep(NA,50)),
+                At = c(At, rep(NA,50)), 
+                Bt = c(Bt,rep(NA,5)),
+                ramalan = c(dt.ramal, f[-1]))
+dt.gab
+
+#Plot time series
+ts.plot(dt.gab[,1], xlab="Periode ", ylab="Penjualan", 
+        main= "DMA N=6 Penjualan Obat")
+points(dt.gab[,1])
+points(dt.gab[,3])
+points(dt.gab[,6])
+lines(dt.gab[,3],col="green",lwd=2)
+lines(dt.gab[,6],col="red",lwd=2)
+legend("topleft",c("data aktual","data pemulusan","data peramalan"), 
+       lty=8, col=c("black","green","red"), cex=0.8)
+```
+
+##Akurasi metode DMA
+
+```{r}
+#Menghitung nilai keakuratan
+error.dma = datats-dt.ramal[1:length(datats)]
+SSE.dma = sum(error.dma[7:length(datats)]^2)
+MSE.dma = mean(error.dma[7:length(datats)]^2)
+MAPE.dma = mean(abs((error.dma[7:length(datats)]/datats[7:length(datats)])*100))
+
+akurasi.dma <- matrix(c(SSE.dma, MSE.dma, MAPE.dma))
+row.names(akurasi.dma)<- c("SSE", "MSE", "MAPE")
+colnames(akurasi.dma) <- c("Akurasi m = 6")
+akurasi.dma
+```
+
+
+#Pemulusan dengan DSE
+
+
+##Pembagian data
+
+Pembagian data dengan komposisi 80% data latih dan 20% data uji
+```{r}
+#Bagi data
+train<-data[1:213,2]
+test<-data[214:267,2]
+
+#Buat agar terbaca sebagai data time series
+train.ts <- ts(train)
+test.ts <- ts(test, start=214)
+
+#Eksplorasi data
+par(nfrow=c(1,2))
+plot(datats, col="red",main="Plot semua data")
+points(datats)
+
+plot(train.ts, col="blue",main="Plot data latih")
+points(train.ts)
+
+plot(test.ts, col="green",main="Plot data uji")
+points(test.ts)
+```
+
+##Pemulusan
+
+Pemulusan dengan metode DSE dengan parameter lambda dan gamma optimal
+```{r}
+#Lambda dan gamma optimum
+des.opt<- HoltWinters(train.ts, gamma=FALSE)
+des.opt
+plot(des.opt)
+legend("topleft", c("Data Aktual", "Peramalan"), col = c("black", "red"), 
+       lty = c(1,1))
+
+#ramalan
+ramalan.desopt<- forecast(des.opt, h=5)
+ramalan.desopt
+```
+
+##Akurasi metode DSE
+
+Akurasi data latih
+```{r}
+#Akurasi data latih
+ssedes.train <- des.opt$SSE
+msedes.train <- ssedes.train/length(train.ts)
+sisaandes <- ramalan.desopt$residuals
+head(sisaandes)
+
+mapedes.train <- sum(abs(sisaandes[3:length(train.ts)]/train.ts[3:length(train.ts)])*100)/length(train.ts)
+
+akurasides.opt <- matrix(c(ssedes.train,msedes.train,mapedes.train))
+row.names(akurasides.opt)<- c("SSE", "MSE", "MAPE")
+colnames(akurasides.opt) <- c("Akurasi lambda dan gamma optimum")
+akurasides.opt
+```
+
+Akurasi data latih dengan metode DSE memiliki nilai MAPE 21,75%. Ini menunjukkan bahwa akurasinya cukup baik.
+
+
+Akurasi data uji
+```{r}
+#Akurasi data uji
+selisihdesopt<-ramalan.desopt$mean-test.ts
+selisihdesopt
+
+SSEtestingdesopt<-sum(selisihdesopt^2)
+SSEtestingdesopt<-SSEtestingdesopt/length(test.ts)
+MAPEtestingdesopt<-sum(abs(selisihdesopt/test.ts)*100)/length(test.ts)
+
+akurasiDesTesting <- matrix(c(SSEtestingdesopt,SSEtestingdesopt,MAPEtestingdesopt))
+row.names(akurasiDesTesting)<- c("SSE", "MSE", "MAPE")
+colnames(akurasiDesTesting) <- c("Akurasi lamda dan gamma optimum")
+akurasiDesTesting
+```
+
+#Perbandingan akurasi
+
+Perbandingan akurasi metode DMA dan DSE
+```{r}
+cbind(akurasi.dma, akurasiDesTesting)
+```
+
+Baik dilihat dari nilai SSE, MSE, maupun MAPE, nilai yang dimiiki pada metode DMA lebih besar dibanding nilai pada metode DES. Hal ini menunjukkan bahwa metode DES memiliki akurasi yang lebih baik dalam pemulusan dan peramalan data.
+
+
+#Regresi
+
+##Eksplorasi data
+```{r}
+#Scatter Plot
+plot(data$pekan, data$penjualan, pch = 20, col = "blue",
+     main = "Scatter Plot Periode vs Penjualan",
+     xlab = "Pekan ke-",
+     ylab = "Penjualan")
+
+#Nilai Korelasi
+cor(data$pekan,data$penjualan)
+```
+
+Berdasarkan scatter plot, diduga ada hubungan linear antara periode (pekan) dengan penjualan analgesik salicylic acid. Hubungan yang ditunjukkan adalah negatif, dengan penjualan obat yang dapat dikatakan kerap menurun seiring periode, meski penurunannya tidak signifikan. Hal ini juga terlihat dari nilai korelasinya yaitu $-0,5185863$.
+
+
+##Model regresi
+```{r}
+model <- lm(penjualan~pekan, data=data)
+summary(model)
+```
+
+Model yang terbentuk adalah $y_i=33.5339-0.0529x_t$
+
+Berdasarkan ringkasan model, diketahui bahwa hasil uji simultan F memiliki *p-value* \< $\alpha$ (5%). Artinya, minimal terdapat satu variabel yang berpengaruh nyata terhadap model.
+
+Adapun hasil uji parsial T kedua parameter regresi menunjukkan bahwa baik intersep maupun koefisien regresi berpengaruh nyata terhadap model. Nilai $R^2=0.2689$, artinya hanya 26,89% keragaman jumlah penjualan analgesik salicylic acid yang dapat dijelaskan oleh periode (pekan).
+
+
+##Pengujian asumsi secara eksploratif
+
+Asumsi yang diuji adalah sisaan menyebar normal dan tidak memiliki autokorelasi.
+
+
+###Kenormalan
+
+Uji kenormalan data secara eksploratif dengan QQ plot dan histogram
+```{r}
+#Nilai sisaan dan fitted value
+sisaan<- residuals(model)
+fitValue<- predict(model)
+
+par(mfrow = c(1,2))
+
+#QQ plot
+qqnorm(sisaan)
+qqline(sisaan, col = "steelblue", lwd = 2)
+
+#Histogram
+hist(sisaan, col = "steelblue")
+```
+
+QQ plot dengan titik-titik yang cenderung mengikuti garis, serta histogram dengan sebaran yang cenderung simetris dan tidak ada kemenjuluran. Kedua hal ini mengindikasikan bahwa sisaan data menyebar normal.
+
+
+###Autokorelasi
+
+Uji autokorelasi secara eksploratif menggunakan plot sisaan vs fitted value dan plot sisaan vs order
+```{r}
+par(mfrow = c(1,2))
+
+#Plot sisaan vs fitted value
+plot(fitValue, sisaan, col = "steelblue", pch = 20, xlab = "Sisaan", ylab = "Fitted Values", main = "Sisaan vs Fitted Values")
+abline(a = 0, b = 0, lwd = 2)
+
+#Plot sisaan vs order
+plot(seq(1,267,1), sisaan, col = "steelblue", pch = 20, xlab = "Sisaan", ylab = "Order", main = "Sisaan vs Order")
+lines(seq(1,267,1), sisaan, col = "red")
+abline(a = 0, b = 0, lwd = 2)
+```
+
+Lebar pita kedua plot di atas tidak seragam (kedua plot memiliki lebar ke atas 30 dan ke bawah 10), terindikasi adanya autokorelasi.
+
+
+##Pengujian asumsi secara formal
+
+Untuk dapat hasil yang lebih akurat, pengujian perlu dilakukan secara formal, tidak hanya secara eksploratif saja.
+
+
+###Kenormalan
+
+Pengujian dilakukan dengan uji formal Kolmogorov-Smirnov
+```{r}
+#H0: sisaan mengikuti sebaran normal
+#H1: sisaan tidak mengikuti sebaran normal
+
+ks.test(sisaan, "pnorm", mean=mean(sisaan), sd=sd(sisaan))
+```
+Didapatkan *p-value* \> $\alpha$ (5%), maka tak tolak H0. Artinya, tidak cukup bukti untuk mengatakan bahwa sisaan tidak menyebar normal. Sisaan menyebar normal.
+
+
+###Autokorelasi
+
+Pengujian dilakukan dengan uji formal Durbin-Watson
+```{r}
+#H0: tidak ada autokorelasi
+#H1: ada autokorelasi
+
+dwtest(model)
+```
+
+Didapatkan *p-value* \< $\alpha$ (5%), maka tolak H0. Artinya, cukup bukti untuk mengatakan bahwa ada autokorelasi.
+
+
+##Penanganan autokorelasi
+
+###Metode Cochrane-Orcutt
+```{r}
+#Penanganan Autokorelasi Cochrane-Orcutt
+modelCO<-cochrane.orcutt(model)
+modelCO
+```
+
+Model yang terbentuk setelah penanganan adalah $y_i=33.77905-0.05446x_t$. Hasil uji Durbin-Watson setelah penanganan adalah *p-value* sebesar 0.6383 \> $\alpha$ (5%), maka tak tolak H0. Artinya, tidak cukup bukti untuk menyatakan adanya autokorelasi. Data setelah penanganan sudah tidak memiliki autokorelasi.
+
+###Transformasi manual
+
+Menentukan nilai $ρ ̂$ optimum
+```{r}
+rho <- modelCO$rho
+rho
+```
+
+Transformasi manual
+```{r}
+penjualan.trans<- data$penjualan[-1]-data$penjualan[-267]*rho
+pekan.trans<- pekan[-1]-pekan[-267]*rho
+modelCOmanual<- lm(penjualan.trans~pekan.trans)
+summary(modelCOmanual)
+```
+
+Hasil model transformasi bukan merupakan model sesungguhnya. Koefisien regresi masih perlu dicari kembali mengikuti $β_0^*=β_0+ρ ̂β_0$ dan $β_1^*=β_1$
+
+
+Penduga koefisien regresi pasca transformasi
+```{r}
+b0bintang <- modelCOmanual$coefficients[-2]
+b0 <- b0bintang/(1-rho)
+b1 <- modelCOmanual$coefficients[-1]
+b0
+b1
+```
+
+Model yang terbentuk sama dengan model yang dihasilkan metode Cochrane-Orcutt, yaitu $y_i=33.77905-0.05446x_t$
